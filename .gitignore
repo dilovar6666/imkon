@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+.venv312/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.log
+*.sqlite3
+instance/
+uploads/
+*.pem
+*.key
