@@ -1,61 +1,68 @@
-# IMKON Backend
+# IMKON
 
-IMKON — бесплатная платформа для поиска постоянной удалённой работы в Таджикистане. Этот репозиторий содержит первый backend-срез на FastAPI; frontend намеренно не включён.
+IMKON — бесплатная платформа поиска постоянной удалённой работы для пользователей Таджикистана и других стран. Репозиторий содержит FastAPI Backend и React Frontend. Платежей, комиссий и фриланс-заказов нет.
 
-## Реализовано
+## Что работает
 
-- Email-регистрация, одноразовое подтверждение email, access/refresh JWT и отзыв refresh-сессий.
-- Профиль соискателя и одно основное резюме с контролем владельца.
-- Заявка работодателя, административное одобрение/отклонение и разделение системной роли с ролью участника организации.
-- Черновики вакансий, отправка на модерацию, публикация только администратором, публичный поиск и пагинация.
-- Один отклик на вакансию на уровне PostgreSQL и контролируемые переходы статуса работодателем.
-- Защищённые административные endpoints для пользователей, заявок и вакансий.
+- Email-регистрация с одноразовым кодом в development, вход, JWT refresh/logout, профиль и основное резюме.
+- Заявка работодателя с одобрением администратором; черновик вакансии, модерация и публикация.
+- Публичный каталог и детальная страница только актуальных опубликованных вакансий; отклик с резюме и защита от повторной отправки.
+- Админ-интерфейс для заявок работодателей, вакансий и блокировки пользователей.
+- Отдельные честные экраны обучения и AI: сервисы пока не подключены.
 
-## Стек
+## Структура
 
-Python 3.12+, FastAPI, SQLAlchemy 2, Pydantic 2, PostgreSQL, Alembic, JWT и pytest.
+`app/` — модульный FastAPI Backend: `core/` конфигурация, БД и JWT; `routers/` API пользователей, работодателей, резюме, вакансий, откликов и администратора; `models.py` и `schemas.py` — модели и контракты. `alembic/` хранит миграции, `scripts/` — ручные команды создания администратора и демо-данных, `tests/` — pytest. `frontend/` содержит Vite + React + TypeScript, Tailwind и компоненты в стиле shadcn/ui. Дизайн Open Horizons разработан через Google Stitch и адаптирован к реальным API; подробности: `STITCH_DESIGN.md`, `FRONTEND_ARCHITECTURE.md`, `DESIGN_SYSTEM.md`, `FRONTEND_API_GAPS.md`.
 
-## Быстрый запуск
+## Backend на Windows PowerShell
+
+Нужны Python 3.12+ и запущенный PostgreSQL. Создайте отдельные базы приложения и тестов. SQLite не поддерживается. Команды установки для обычного окружения Windows:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 Copy-Item .env.example .env
-# отредактируйте DATABASE_URL и JWT_SECRET_KEY в .env
-alembic upgrade head
-uvicorn app.main:app --reload
 ```
 
-Swagger: `http://127.0.0.1:8000/docs`; health-check: `http://127.0.0.1:8000/health`.
-
-## PostgreSQL и миграции
-
-Создайте отдельные базы `imkon` и `imkon_test`; SQLite не поддерживается. Изменения схемы выполняются только через Alembic:
+В `.env` укажите свой `DATABASE_URL` с драйвером `postgresql+psycopg`, случайный `JWT_SECRET_KEY` длиной не менее 32 символов и `CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`. Не добавляйте `.env` в Git. После настройки:
 
 ```powershell
-alembic revision --autogenerate -m "description"
-alembic upgrade head
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Администратор и демо-данные
+Swagger: `http://127.0.0.1:8000/docs`; OpenAPI: `http://127.0.0.1:8000/openapi.json`; health: `http://127.0.0.1:8000/health`. Миграции проверены на отдельной локальной PostgreSQL-базе; таблицы не создаются через `create_all()` при запуске.
+
+## Frontend на Windows PowerShell
+
+В другом терминале:
 
 ```powershell
-python scripts/create_admin.py --email admin@example.com
-python scripts/seed_demo.py
+Set-Location frontend
+Copy-Item .env.example .env.local
+npm.cmd install
+npm.cmd run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Пароль администратора запрашивается скрыто; скрипт не содержит стандартного пароля. Demo-данные запускаются вручную и помечают вакансию как тестовую.
+Откройте `http://127.0.0.1:5173`. `VITE_API_URL` в `frontend/.env.local` должен указывать на текущий Backend, по умолчанию `http://127.0.0.1:8000/api/v1`. Если используете другой порт Vite, добавьте его origin в `CORS_ORIGINS` и перезапустите Backend. Docker не требуется.
 
-## Тесты
-
-Тесты требуют отдельную PostgreSQL-базу и не используют `DATABASE_URL` разработки:
+## Администратор, демо и тесты
 
 ```powershell
-$env:TEST_DATABASE_URL="postgresql+psycopg://imkon:password@localhost:5432/imkon_test"
-pytest
+.\.venv\Scripts\python.exe scripts/create_admin.py --email admin@example.com
+.\.venv\Scripts\python.exe scripts/seed_demo.py
+$env:TEST_DATABASE_URL="postgresql+psycopg://test_user:your_password@127.0.0.1:5432/imkon_test"
+.\.venv\Scripts\python.exe -m pytest -q
+Set-Location frontend
+npm.cmd run typecheck
+npm.cmd run build
+npm.cmd run test:browser
 ```
 
-## Следующие этапы
+Пароль администратора вводится скрыто. Демо-скрипт запускается вручную и помечает вакансии. `test:browser` использует установленный Microsoft Edge, локальные серверы и тестовую PostgreSQL-базу; он создаёт тестовые аккаунты. Для дополнительного сценария администрирования передайте в окружении `IMKON_QA_ADMIN_EMAIL` и `IMKON_QA_ADMIN_PASSWORD` тестового администратора. Никогда не направляйте browser QA на production.
 
-SMTP-доставка, OAuth Google/Telegram, Redis/Celery, WebSocket-чат, обучение, сертификаты, Gemini и React-клиент запланированы, но не имеют фиктивных endpoint-ов в этом срезе.
+PWA-кэш проверяется отдельно после `npm.cmd run build`: запустите `npm.cmd run preview -- --host 127.0.0.1 --port 5175`, затем в другом терминале из `frontend/` выполните `npm.cmd run test:pwa`. Тест требует установленного Microsoft Edge.
+
+## Ограничения
+
+Production SMTP, rate limiting, полноценное управление HR, TG/EN локализация, Gemini, курсы, чат, уведомления и расширенный поиск ещё не реализованы. Refresh JWT не хранится долговременно на клиенте. Точные пробелы API и результаты проверок описаны в `FRONTEND_API_GAPS.md` и `FRONTEND_QA.md`.

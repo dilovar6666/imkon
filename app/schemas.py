@@ -32,6 +32,10 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
+class GoogleTokenIn(BaseModel):
+    id_token: str = Field(min_length=20, max_length=8192)
+
+
 class TokenPair(ModelSchema):
     access_token: str
     refresh_token: str
@@ -50,14 +54,26 @@ class ProfileUpdate(BaseModel):
     portfolio_urls: list[str] | None = None
 
 
+class SeekerProfileOut(ModelSchema):
+    full_name: str | None
+    bio: str | None
+    desired_position: str | None
+    schedule_preference: str | None
+    contact_preference: str | None
+    work_conditions: list
+    skills: list
+    languages: list
+    portfolio_urls: list
+
+
 class UserOut(ModelSchema):
     id: int
-    email: EmailStr
+    email: str
     role: UserRole
     is_email_verified: bool
     is_active: bool
     created_at: datetime
-    profile: Any | None = None
+    profile: SeekerProfileOut | None = None
 
 
 class EmployerApplicationIn(BaseModel):

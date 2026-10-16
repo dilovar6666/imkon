@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -21,7 +23,7 @@ EMPLOYER_TRANSITIONS = {
 @router.post("/vacancies/{vacancy_id}", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
 def apply(vacancy_id: int, payload: ApplicationIn, user: CurrentUser, db: DbSession):
     vacancy = db.get(Vacancy, vacancy_id)
-    if not vacancy or vacancy.status != VacancyStatus.published:
+    if not vacancy or vacancy.status != VacancyStatus.published or vacancy.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=404, detail="Активная вакансия не найдена")
     resume = db.get(Resume, payload.resume_id)
     if not resume or resume.user_id != user.id:

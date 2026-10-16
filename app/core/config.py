@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     access_token_minutes: int = 30
     refresh_token_days: int = 14
     email_code_minutes: int = 15
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:

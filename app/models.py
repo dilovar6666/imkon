@@ -63,6 +63,15 @@ class User(Base):
     resumes: Mapped[list["Resume"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
+class GoogleIdentity(Base):
+    __tablename__ = "google_identities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    subject: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class EmailVerificationCode(Base):
     __tablename__ = "email_verification_codes"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -159,7 +168,10 @@ class Resume(Base):
 
 class Vacancy(Base):
     __tablename__ = "vacancies"
-    __table_args__ = (CheckConstraint("salary_min IS NULL OR salary_min >= 0", name="salary_min_nonnegative"),)
+    __table_args__ = (
+        CheckConstraint("salary_min IS NULL OR salary_min >= 0", name="salary_min_nonnegative"),
+        CheckConstraint("salary_min IS NULL OR salary_max IS NULL OR salary_max >= salary_min", name="salary_range_valid"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     employer_id: Mapped[int] = mapped_column(ForeignKey("employer_profiles.id"), index=True)
     title: Mapped[str] = mapped_column(String(250), index=True)

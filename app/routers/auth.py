@@ -8,10 +8,45 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, DbSession
 from app.core.security import create_token, decode_token, hash_password, token_hash, verify_password
-from app.models import EmailVerificationCode, RefreshSession, User
-from app.schemas import LoginIn, Message, RefreshIn, RegisterIn, TokenPair, VerifyEmailIn
+from app.models import EmailVerificationCode, GoogleIdentity, RefreshSession, User, UserRole
+from app.schemas import GoogleTokenIn, LoginIn, Message, RefreshIn, RegisterIn, TokenPair, VerifyEmailIn
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _verify_google_token(id_token: str) -> dict[str, str]:
+    settings = get_settings()
+    if not settings.google_client_id:
+        raise HTTPException(status_code=503, detail="Google OAuth не настроен")
+    if id_token.count(".") != 2:
+        raise HTTPException(status_code=401, detail="Google credential имеет неверный формат")
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+        claims = google_id_token.verify_oauth2_token(id_token, google_requests.Request(), settings.google_client_id)
+    except HTTPException:
+        raise
+    except ImportError as error:
+        raise HTTPException(status_code=503, detail="Серверная проверка Google OAuth недоступна") from error
+    except Exception as error:
+        category = str(error).lower()
+        if "audience" in category:
+            detail = "Google token audience не совпадает с настроенным Client ID"
+        elif "issuer" in category or "iss" in category:
+            detail = "Google token issuer не прошёл проверку"
+        elif "expired" in category or "exp" in category:
+            detail = "Срок действия Google token истёк"
+        elif "transport" in category or "certificate" in category or "connection" in category:
+            raise HTTPException(status_code=503, detail="Не удалось получить сертификаты Google") from error
+        else:
+            detail = "Google ID token не прошёл проверку подписи или формата"
+        raise HTTPException(status_code=401, detail=detail) from error
+    issuer = claims.get("iss")
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"} or not claims.get("sub"):
+        raise HTTPException(status_code=401, detail="Недействительный Google ID token")
+    if claims.get("email_verified") is not True or not claims.get("email"):
+        raise HTTPException(status_code=403, detail="Google email должен быть подтверждён")
+    return {"sub": str(claims["sub"]), "email": str(claims["email"]).lower()}
 
 
 def _issue_tokens(db: DbSession, user: User) -> TokenPair:
@@ -66,6 +101,40 @@ def login(payload: LoginIn, db: DbSession):
     return _issue_tokens(db, user)
 
 
+@router.post("/google", response_model=TokenPair)
+def google_login(payload: GoogleTokenIn, db: DbSession):
+    claims = _verify_google_token(payload.id_token)
+    identity = db.scalar(select(GoogleIdentity).where(GoogleIdentity.subject == claims["sub"]))
+    if identity:
+        user = db.get(User, identity.user_id)
+        if not user or not user.is_active:
+            raise HTTPException(status_code=403, detail="Аккаунт недоступен")
+        return _issue_tokens(db, user)
+    existing = db.scalar(select(User).where(User.email == claims["email"]))
+    if existing:
+        raise HTTPException(status_code=409, detail="Email уже зарегистрирован. Войдите по паролю и привяжите Google в настройках.")
+    user = User(email=claims["email"], password_hash=hash_password(token_hash(payload.id_token)), role=UserRole.seeker, is_email_verified=True)
+    db.add(user)
+    db.flush()
+    db.add(GoogleIdentity(user_id=user.id, subject=claims["sub"], email=claims["email"]))
+    db.commit()
+    return _issue_tokens(db, user)
+
+
+@router.post("/google/link", response_model=Message)
+def link_google(payload: GoogleTokenIn, db: DbSession, user: CurrentUser):
+    claims = _verify_google_token(payload.id_token)
+    linked = db.scalar(select(GoogleIdentity).where(GoogleIdentity.subject == claims["sub"]))
+    if linked and linked.user_id != user.id:
+        raise HTTPException(status_code=409, detail="Google аккаунт уже привязан к другому пользователю")
+    if user.email.lower() != claims["email"] or not user.is_email_verified:
+        raise HTTPException(status_code=403, detail="Для привязки нужен подтверждённый email текущего аккаунта")
+    if not linked:
+        db.add(GoogleIdentity(user_id=user.id, subject=claims["sub"], email=claims["email"]))
+        db.commit()
+    return Message(detail="Google аккаунт привязан")
+
+
 @router.post("/refresh", response_model=TokenPair)
 def refresh(payload: RefreshIn, db: DbSession):
     try:
@@ -85,8 +154,10 @@ def refresh(payload: RefreshIn, db: DbSession):
 
 
 @router.post("/logout", response_model=Message)
-def logout(payload: RefreshIn, db: DbSession, _: CurrentUser):
+def logout(payload: RefreshIn, db: DbSession, user: CurrentUser):
     session = db.scalar(select(RefreshSession).where(RefreshSession.token_hash == token_hash(payload.refresh_token)))
+    if session and session.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Нельзя завершить чужую сессию")
     if session:
         from datetime import datetime, timezone
         session.revoked_at = datetime.now(timezone.utc)

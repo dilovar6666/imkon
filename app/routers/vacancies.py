@@ -44,6 +44,14 @@ def list_vacancies(
     return list(db.scalars(stmt.order_by(Vacancy.created_at.desc()).offset(skip).limit(limit)))
 
 
+@router.get("/{vacancy_id}", response_model=VacancyOut)
+def get_vacancy(vacancy_id: int, db: DbSession):
+    vacancy = db.get(Vacancy, vacancy_id)
+    if not vacancy or vacancy.status != VacancyStatus.published or vacancy.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=404, detail="Активная вакансия не найдена")
+    return vacancy
+
+
 @router.post("", response_model=VacancyOut, status_code=status.HTTP_201_CREATED)
 def create_vacancy(payload: VacancyIn, user: CurrentUser, db: DbSession):
     employer = user_employer(db, user.id)
@@ -66,6 +74,8 @@ def update_vacancy(vacancy_id: int, payload: VacancyIn, user: CurrentUser, db: D
     assert_employer_member(db, user.id, vacancy.employer_id)
     if vacancy.status in {VacancyStatus.closed, VacancyStatus.expired}:
         raise HTTPException(status_code=409, detail="Закрытую вакансию нельзя редактировать")
+    if payload.salary_max is not None and payload.salary_min is not None and payload.salary_max < payload.salary_min:
+        raise HTTPException(status_code=422, detail="Максимальная зарплата не может быть меньше минимальной")
     for key, value in payload.model_dump().items():
         setattr(vacancy, key, value)
     if vacancy.status == VacancyStatus.published:
